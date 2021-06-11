@@ -1,5 +1,5 @@
 App = {
-  web3Provider: null,
+  Provider: null,
   contracts: {},
 
   init: async function() {
@@ -20,45 +20,30 @@ App = {
       }
     });
 
-    return await App.initWeb3();
+    return await App.initEtherJS();
   },
 
-  initWeb3: async function() {
-    if (window.ethereum) {
-      App.web3Provider = window.ethereum;
-      try {
-        // Request account access
-        await window.ethereum.enable();
-      } catch (error) {
-        // User denied account access...
-        console.error("User denied account access")
-      }
-    }
-    // Legacy dapp browsers...
-    else if (window.web3) {
-      App.web3Provider = window.web3.currentProvider;
-    }
-    // If no injected web3 instance is detected, fall back to Ganache
-    else {
-      App.web3Provider = new Web3.providers.HttpProvider('http://localhost:7545');
-    }
-    web3 = new Web3(App.web3Provider);
+  initEtherJS: async function() {
+    App.Provider = new ethers.providers.Web3Provider(window.ethereum)
+
+    // The Metamask plugin also allows signing transactions to
+    // send ether and pay to change state within the blockchain.
+    // For this, you need the account signer...
+    const signer = App.Provider.getSigner()
 
     return App.initContract();
   },
 
   initContract: function() {
-    $.getJSON('Adoption.json', function(data) {
-      // Get the necessary contract artifact file and instantiate it with @truffle/contract
-      var AdoptionArtifact = data;
-      App.contracts.Adoption = TruffleContract(AdoptionArtifact);
+    const ABI = [
+      'function adopt(uint petId) returns (uint)',
+      'function getAdopters() view returns (address[16])'
+    ];
+    const address = "0x071F00Fb9D1000Be54f8E29EBEbd656CaC9c08fe";
     
-      // Set the provider for our contract
-      App.contracts.Adoption.setProvider(App.web3Provider);
+    App.contracts.Adoption = new ethers.Contract(address, ABI, App.Provider)
     
-      // Use our contract to retrieve and mark the adopted pets
-      return App.markAdopted();
-    });
+    App.markAdopted();
 
     return App.bindEvents();
   },
@@ -67,51 +52,33 @@ App = {
     $(document).on('click', '.btn-adopt', App.handleAdopt);
   },
 
-  markAdopted: function() {
-    var adoptionInstance;
-
-    App.contracts.Adoption.deployed().then(function(instance) {
-      adoptionInstance = instance;
-
-      return adoptionInstance.getAdopters.call();
-    }).then(function(adopters) {
-      for (i = 0; i < adopters.length; i++) {
-        if (adopters[i] !== '0x0000000000000000000000000000000000000000') {
-          $('.panel-pet').eq(i).find('button').text('Success').attr('disabled', true);
+  markAdopted: async function() {
+    App.contracts.Adoption.getAdopters()
+      .then(function(adopters) {
+        for (i = 0; i < adopters.length; i++) {
+          if (adopters[i] !== '0x0000000000000000000000000000000000000000') {
+            $('.panel-pet').eq(i).find('button').text('Success').attr('disabled', true);
+          }
         }
-      }
-    }).catch(function(err) {
-      console.log(err.message);
-    });
+      }).catch(function(err) {
+        console.log(err)
+        console.error(err.message);
+      });
   },
 
   handleAdopt: function(event) {
     event.preventDefault();
+    
+    const petId = parseInt($(event.target).data('id'));
 
-    var petId = parseInt($(event.target).data('id'));
-
-    var adoptionInstance;
-
-    web3.eth.getAccounts(function(error, accounts) {
-      if (error) {
-        console.log(error);
-      }
-
-      var account = accounts[0];
-
-      App.contracts.Adoption.deployed().then(function(instance) {
-        adoptionInstance = instance;
-
-        // Execute adopt as a transaction by sending account
-        return adoptionInstance.adopt(petId, {from: account});
-      }).then(function(result) {
+    App.contracts.Adoption.adopt(petId)
+      .then(function(res) {
+        console.log(res);
         return App.markAdopted();
       }).catch(function(err) {
         console.log(err.message);
       });
-    });
   }
-
 };
 
 $(function() {
